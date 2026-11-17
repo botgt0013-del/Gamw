@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ular Tangga Online</title>
+<style>
+body{margin:0;background:#2b2b2b;color:#fff;font-family:"Courier New",monospace;font-weight:bold;padding:10px 10px 40px;display:flex;flex-direction:column;align-items:center}
+.btn{background:#7a7a7a;color:#fff;border:3px solid #000;border-top-color:#bbb;border-left-color:#bbb;padding:10px 14px;font:inherit;cursor:pointer;margin:4px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+input{font:inherit;padding:8px;border:3px solid #000;width:100%;max-width:280px;margin:4px 0;box-sizing:border-box;text-align:center}
+.card{background:#3b3b3b;border:3px solid #000;padding:12px;width:100%;max-width:520px;margin:8px 0;box-sizing:border-box}
+#board{display:grid;grid-template-columns:repeat(10,1fr);width:100%;max-width:520px;aspect-ratio:1;border:4px solid #000;background:#000;box-sizing:border-box}
+.cell{position:relative;font-size:11px;padding:2px;border:1px solid rgba(0,0,0,.35);background:#5d9b3a;color:#fff;overflow:hidden}
+.cell.alt{background:#4f8a31}
+.cell.gold{background:#e5c100;color:#000}
+.tk{display:inline-block;width:12px;height:12px;border:1px solid #000;margin-right:3px;vertical-align:middle}
+.tokens{position:absolute;bottom:1px;left:1px;right:1px;line-height:1}
+.log{height:160px;overflow:auto;font-size:12px;background:#222;padding:6px;border:2px solid #000}
+#quiz{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:10;padding:16px}
+#qbox{background:#3b3b3b;border:4px solid #000;padding:16px;max-width:420px;width:100%;box-sizing:border-box}
+#qbox .btn{display:block;width:100%;box-sizing:border-box}
+.err{color:#ff7777;min-height:18px;font-size:13px}
+[hidden]{display:none!important}
+</style></head><body>
+
+<div id="sLobby" class="card" style="text-align:center">
+  <h2>⛏ ULAR TANGGA ONLINE ⛏</h2>
+  <input id="name" placeholder="Nama kamu" maxlength="12">
+  <div><button class="btn" id="bCreate">BUAT ROOM</button></div>
+  <input id="code" placeholder="Kode room" maxlength="5">
+  <div><button class="btn" id="bJoin">GABUNG ROOM</button></div>
+  <div class="err" id="err1"></div>
+</div>
+
+<div id="sRoom" hidden>
+  <div class="card" style="text-align:center">
+    <div>Kode room: <b id="rcode" style="font-size:22px;letter-spacing:3px"></b></div>
+    <div id="rplayers" style="margin:8px 0;text-align:left"></div>
+    <button class="btn" id="bStart" hidden>MULAI GAME</button>
+    <div class="err" id="err2"></div>
+  </div>
+
+  <div id="gameView" hidden style="width:100%;display:flex;flex-direction:column;align-items:center">
+    <div id="board"></div>
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div id="turnText" style="font-size:14px"></div>
+      <button class="btn" id="bRoll">KOCOK</button>
+    </div>
+    <div id="pinfo" class="card" style="font-size:13px"></div>
+    <div class="card"><div class="log" id="log"></div></div>
+  </div>
+</div>
+
+<div id="quiz" hidden>
+  <div id="qbox">
+    <div id="qwho" style="font-size:14px;margin-bottom:6px"></div>
+    <div id="qtext" style="font-size:16px;margin:10px 0 14px"></div>
+    <div id="qopts"></div>
+  </div>
+</div>
+
+<script>
+const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+const ws = new WebSocket(proto + location.host);
+let me = null;
+let st = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function send(o) {
+  if (ws.readyState === 1) ws.send(JSON.stringify(o));
+}
+
+function showErr(text) {
+  $('err1').textContent = text;
+  $('err2').textContent = text;
+  setTimeout(() => { $('err1').textContent = ''; $('err2').textContent = ''; }, 2500);
+}
+
+ws.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.type === 'hello') me = m.you;
+  else if (m.type === 'error') showErr(m.text);
+  else if (m.type === 'state') {
+    me = m.you;
+    st = m.room;
+    render();
+  }
+};
+
+ws.onclose = () => showErr('Koneksi ke server terputus. Muat ulang halaman.');
+
+$('bCreate').onclick = () => send({ type: 'create', name: $('name').value });
+$('bJoin').onclick = () => send({ type: 'join', name: $('name').value, code: $('code').value });
+$('bStart').onclick = () => send({ type: 'start' });
+$('bRoll').onclick = () => send({ type: 'roll' });
+
+function render() {
+  if (!st) return;
+  $('sLobby').hidden = true;
+  $('sRoom').hidden = false;
+  $('rcode').textContent = st.code;
+  $('rplayers').innerHTML = st.players.map((p) =>
+    `<div><span class="tk" style="background:${p.color}"></span>${esc(p.name)}${p.pid === me ? ' (kamu)' : ''}${p.pid === st.host ? ' 👑' : ''}</div>`
+  ).join('');
+  $('bStart').hidden = !(st.host === me && st.phase === 'lobby');
+  $('gameView').hidden = st.phase === 'lobby';
+  if (st.phase === 'lobby') return;
+  renderBoard();
+  renderTurn();
+  renderQuiz();
+  renderLog();
+}
+
+// Kotak 1..100 dengan pola zig-zag, sama seperti versi offline
+function renderBoard() {
+  const b = $('board');
+  if (!b.children.length) {
+    for (let g = 0; g < 100; g++) {
+      const d = document.createElement('div');
+      d.className = 'cell';
+      d.dataset.g = g;
+      b.appendChild(d);
+    }
+  }
+  const L = st.map.L;
+  const S = st.map.S;
+  for (const cell of b.children) {
+    const g = +cell.dataset.g;
+    const row = Math.floor(g / 10);
+    const c = g % 10;
+    const r = 9 - row;
+    const n = r * 10 + (r % 2 ? 10 - c : c + 1);
+    cell.className = 'cell' + (n === 100 ? ' gold' : ((r + c) % 2 ? ' alt' : ''));
+    let html = n === 100 ? '100⭐' : `<span>${n}</span>`;
+    if (L[n]) html += ' 🪜';
+    if (S[n]) html += ' 💥';
+    const here = st.players.filter((p) => p.pos === n)
+      .map((p) => `<span class="tk" style="background:${p.color}" title="${esc(p.name)}"></span>`).join('');
+    html += `<div class="tokens">${here}</div>`;
+    cell.innerHTML = html;
+  }
+}
+
+function renderTurn() {
+  const cur = st.players[st.turn];
+  const myTurn = st.phase === 'play' && cur && cur.pid === me;
+  $('bRoll').disabled = !myTurn;
+  let t = '';
+  if (st.phase === 'play') t = `Giliran ${cur ? esc(cur.name) : ''}${myTurn ? ' (kamu)' : ''}`;
+  else if (st.phase === 'quiz') t = '📚 Kuis berlangsung';
+  else if (st.phase === 'over') t = `🏆 ${esc(st.winner)} MENANG!`;
+  $('turnText').innerHTML = t;
+  $('pinfo').innerHTML = st.players.map((p) =>
+    `<div><span class="tk" style="background:${p.color}"></span>${esc(p.name)}: kotak ${p.pos}</div>`
+  ).join('');
+}
+
+function renderQuiz() {
+  const q = st.quiz;
+  const box = $('quiz');
+  if (!q || st.phase !== 'quiz') {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const who = st.players.find((p) => p.pid === q.pid);
+  $('qwho').textContent = `Giliran ${who ? who.name : ''} menjawab`;
+  $('qtext').textContent = q.q;
+  const opts = $('qopts');
+  opts.innerHTML = '';
+  q.opts.forEach((o, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = o;
+    b.disabled = q.pid !== me;
+    b.onclick = () => {
+      b.disabled = true;
+      send({ type: 'answer', choice: i });
+    };
+    opts.appendChild(b);
+  });
+}
+
+function renderLog() {
+  const l = $('log');
+  l.innerHTML = st.log.map((x) => `<div>${esc(x)}</div>`).join('');
+  l.scrollTop = l.scrollHeight;
+}
+</script>
+</body></html>
